@@ -2,7 +2,7 @@
 
 SceneTest is a contract-driven prototype for agentic text-to-3D scene generation. It converts a prompt into a structured scene contract, compiles executable graphics unit tests, runs generated scene code, and uses failed tests to guide localized repairs.
 
-The implementation is reproducible without API keys. It uses a deterministic local Contract Agent by default, supports an optional DeepSeek-backed Contract Agent, evaluates all scenes with an in-memory SceneBuilder, writes top-down preview images, and can render `scene.json` artifacts through Blender.
+The implementation is reproducible without API keys. It uses a deterministic local Contract Agent by default, supports an optional DeepSeek-backed Contract Agent, evaluates all scenes with an in-memory SceneBuilder, writes top-down preview images, can run a text-only LLM semantic audit, and can render `scene.json` artifacts through Blender.
 
 Code: this repository.
 
@@ -79,6 +79,7 @@ Open <http://127.0.0.1:7860>. The page accepts a prompt, runs the full SceneTest
 - single-pass, contract-only, and repaired SceneTest renders
 - test pass counts and failed tests
 - repair history
+- optional text-only LLM semantic audit
 - optional Blender final render
 
 For a live DeepSeek demonstration, keep the local-only `config.json` in this directory and select the DeepSeek backend in the page. The real `config.json` is ignored by Git and is not uploaded.
@@ -93,6 +94,7 @@ Each run writes:
 - `test_results.json`
 - `render.png`
 - `scene.blender.py`
+- optional `llm_audit.json`
 
 ## Optional DeepSeek Contract Agent
 
@@ -111,6 +113,30 @@ export DEEPSEEK_API_KEY="your_key_here"
 ```
 
 Without `--no-llm-fallback`, the DeepSeek backend falls back to the deterministic parser if the API is unavailable.
+
+## Optional LLM Semantic Audit
+
+The code tests check executable requirements such as existence, relations, material, lighting, and visibility. They do not fully judge whether a named real object is semantically plausible. For that, SceneTest can ask DeepSeek to review the text artifacts after generation:
+
+```bash
+.venv/bin/python main.py run \
+  --contract-backend deepseek \
+  --no-llm-fallback \
+  --llm-audit \
+  --scene-id audited_demo \
+  --out-dir experiments/runs/audited_demo \
+  --prompt "Create a desk scene with a monitor, keyboard, mouse, and lamp."
+```
+
+Or audit an existing run:
+
+```bash
+.venv/bin/python main.py audit \
+  --run-dir experiments/runs/audited_demo \
+  --method scenetest
+```
+
+This writes `scenetest/llm_audit.json`. The audit is explicitly text-only: it reads the prompt, contract, final `scene.json`, test results, and repair history, but it does not inspect rendered images. It is therefore a semantic supplement to code tests, not a visual model replacement.
 
 Or create a local-only `config.json`:
 

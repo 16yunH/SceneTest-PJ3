@@ -27,12 +27,16 @@ from reportlab.platypus import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUN_DIR = ROOT / "experiments" / "runs" / "batch"
+RUN_DIR = (
+    ROOT / "experiments" / "runs" / "real_api_50_full_after_fix"
+    if (ROOT / "experiments" / "runs" / "real_api_50_full_after_fix").exists()
+    else ROOT / "experiments" / "runs" / "batch"
+)
 OUT_DIR = ROOT / "deliverables" / "report"
 ASSET_DIR = ROOT / "deliverables" / "assets"
-AUTHOR_EN = os.environ.get("SCENETEST_AUTHOR_EN", "Your Name")
-STUDENT_ID = os.environ.get("SCENETEST_STUDENT_ID", "Student ID")
-CODE_URL = os.environ.get("SCENETEST_CODE_URL", "https://github.com/<your-github-user>/SceneTest-PJ3")
+AUTHOR_EN = os.environ.get("SCENETEST_AUTHOR_EN", "Yun Hong")
+STUDENT_ID = os.environ.get("SCENETEST_STUDENT_ID", "23300240019")
+CODE_URL = os.environ.get("SCENETEST_CODE_URL", "https://github.com/16yunH/SceneTest-PJ3")
 
 
 def load_results() -> list[dict[str, str]]:
@@ -125,10 +129,11 @@ def build_pdf() -> Path:
             Contract, compiles the contract into executable graphics unit tests, and uses failed tests
             to guide localized repairs of the generated scene. The prototype implements a deterministic
             contract parser, a constrained scene-builder API, object/relation/material/lighting/visibility
-            tests, and repair rules that create missing objects, move objects according to failed
-            relations, fix appearance constraints, and auto-frame the camera. On a 20-prompt benchmark
-            with 311 generated tests, SceneTest improves overall contract pass rate from 67.2% for a
-            single-pass baseline and 79.1% for a contract-only baseline to 100.0% after repair.
+            tests, repair rules that create missing objects, move objects according to failed
+            relations, fix appearance constraints, auto-frame the camera, and an optional text-only
+            LLM semantic audit. On a 50-prompt benchmark with 850 generated tests, SceneTest improves
+            overall contract pass rate from 70.5% for a single-pass baseline and 80.4% for a
+            contract-only baseline to 100.0% after repair.
             """,
             body,
         )
@@ -252,8 +257,9 @@ def build_pdf() -> Path:
     story.append(
         para(
             """
-            We evaluate 20 prompts spanning desk scenes, living rooms, geometric arrangements, and stylized
-            setups. The evaluation compares three methods: Single-pass, Contract-only, and SceneTest.
+            We evaluate 50 prompts spanning desk scenes, living rooms, geometric arrangements, stylized
+            setups, and open-vocabulary tabletop scenes. The evaluation compares three methods: Single-pass,
+            Contract-only, and SceneTest.
             Single-pass simulates unconstrained prompt-to-scene generation with omitted objects and relation
             mistakes. Contract-only uses the contract and helper API but does not repair failed tests.
             SceneTest runs the same initial contract-only scene through graphics unit tests and repairs.
@@ -266,9 +272,11 @@ def build_pdf() -> Path:
     story.append(
         para(
             """
-            The benchmark generated 93 object tests, 73 spatial relation tests, 93 visibility tests, 10 color
-            tests, 2 material tests, and 20 lighting tests. SceneTest reached 311/311 passing tests after
-            repair.
+            The benchmark generated 243 object tests, 193 spatial relation tests, 243 visibility tests, 36 color
+            tests, 35 material tests, and 50 lighting tests. SceneTest reached 850/850 passing tests after
+            repair. A selective text-only LLM semantic audit is implemented as an optional semantic QA layer.
+            It is intentionally lenient about fine mesh detail because the current prototype represents many
+            open-vocabulary objects with primitive or composite proxy geometry.
             """,
             small,
         )
@@ -430,7 +438,7 @@ def build_tex() -> Path:
 \begin{{abstract}}
 SceneTest converts a natural-language 3D scene prompt into a structured Scene Contract,
 compiles the contract into executable graphics unit tests, and uses failed tests to guide
-localized repairs. On a 20-prompt benchmark with 311 generated tests, SceneTest improves
+localized repairs. On a 50-prompt benchmark with 850 generated tests, SceneTest improves
 overall contract pass rate from {100*metric_rate(rows, "single_pass", "Overall Contract Pass Rate"):.1f}\%
 for a single-pass baseline and {100*metric_rate(rows, "contract_only", "Overall Contract Pass Rate"):.1f}\%
 for a contract-only baseline to {100*metric_rate(rows, "scenetest", "Overall Contract Pass Rate"):.1f}\%.
@@ -449,7 +457,7 @@ Visibility pass rate & {100*metric_rate(rows, "single_pass", "Visibility Pass Ra
 \bottomrule
 \end{{tabular}}
 \section{{Member Contributions}}
-{AUTHOR_EN} / {STUDENT_ID}: project design, Scene Contract schema, Contract Agent and DeepSeek integration, helper-API scene builder, graphics unit tests, repair loop, Blender renderer, benchmark execution, live demo interface, report, and presentation.
+{AUTHOR_EN} / {STUDENT_ID}: project design, Scene Contract schema, Contract Agent and DeepSeek integration, helper-API scene builder, graphics unit tests, repair loop, text-only LLM semantic auditor, Blender renderer, benchmark execution, live demo interface, report, and presentation.
 \end{{document}}
 """
     tex_path.write_text(tex.strip() + "\n", encoding="utf-8")

@@ -4,6 +4,7 @@ import unittest
 
 from scenetest.agents.code_agent import CodeAgent
 from scenetest.agents.contract_agent import ContractAgent
+from scenetest.agents.llm_auditor import DeepSeekSceneAuditor, normalize_semantic_audit, summarize_scene
 from scenetest.core.contract_schema import CameraSpec, ContractObject, Relation, SceneContract
 from scenetest.core.repair_rules import repair_loop
 from scenetest.core.scene_builder import SceneBuilder
@@ -80,6 +81,22 @@ class PipelineTests(unittest.TestCase):
         self.assertIn(("tape_roll", "left_of", "cardboard_box"), relation_keys)
         self.assertIn(("cardboard_box", "on", "table"), relation_keys)
 
+    def test_open_object_parser_covers_extended_prompt_objects(self) -> None:
+        prompt = (
+            "Create a drone repair bench with a drone on a table, a screwdriver "
+            "to the left of the drone, a battery pack to the right of the drone, "
+            "and a monitor behind the table. Add a magnifying glass and a globe."
+        )
+        contract = ContractAgent().parse(prompt, scene_id="extended")
+        types = {obj.id: obj.type for obj in contract.objects}
+        self.assertEqual(types["drone"], "drone")
+        self.assertEqual(types["screwdriver"], "screwdriver")
+        self.assertEqual(types["battery_pack"], "battery_pack")
+        self.assertEqual(types["monitor"], "monitor")
+        self.assertEqual(types["magnifying_glass"], "magnifying_glass")
+        self.assertEqual(types["globe"], "globe")
+        self.assertNotIn("generic", types.values())
+
     def test_supported_objects_remain_on_surface_after_planar_relation(self) -> None:
         scene = SceneBuilder()
         scene.add_low_table("low_table")
@@ -104,6 +121,59 @@ class PipelineTests(unittest.TestCase):
         summary = summarize_results(run_tests(scene, compile_tests(contract)))
         self.assertEqual(summary["passed"], summary["total"])
 
+    def test_llm_auditor_builds_text_only_request(self) -> None:
+        auditor = DeepSeekSceneAuditor(api_key="test-key")
+        body = auditor._build_request_body(
+            scene_id="unit",
+            prompt="Create a keyboard on a desk.",
+            contract={"id": "unit", "objects": [{"id": "keyboard", "type": "keyboard"}]},
+            scene={"objects": [{"id": "keyboard", "type": "keyboard", "size": [1, 0.3, 0.08]}]},
+            test_results=[{"name": "exists:keyboard", "status": "pass"}],
+            repair_history=[],
+        )
+        content = body["messages"][1]["content"]
+        self.assertEqual(body["response_format"], {"type": "json_object"})
+        self.assertNotIn("image_url", content)
+        self.assertIn("final_scene_json", content)
+
+    def test_llm_audit_normalization_clamps_scores_and_issues(self) -> None:
+        audit = normalize_semantic_audit(
+            {
+                "overall_score": 1.4,
+                "object_semantics_score": -0.2,
+                "pass": True,
+                "issues": {"severity": "critical", "category": "object", "message": "keyboard is too generic"},
+                "confidence": "0.8",
+            },
+            scene_id="unit",
+        )
+        self.assertEqual(audit["overall_score"], 1.0)
+        self.assertEqual(audit["object_semantics_score"], 0.0)
+        self.assertEqual(audit["issues"][0]["severity"], "minor")
+        self.assertEqual(audit["confidence"], 0.8)
+        self.assertIn("Text-only audit", audit["limitations"])
+
+    def test_llm_audit_treats_proxy_modeling_as_minor(self) -> None:
+        audit = normalize_semantic_audit(
+            {
+                "overall_score": 0.72,
+                "pass": False,
+                "issues": [
+                    {
+                        "severity": "major",
+                        "category": "object",
+                        "message": "drone is represented as a generic cube proxy with little detail",
+                    }
+                ],
+            },
+            scene_id="unit",
+        )
+        self.assertTrue(audit["pass"])
+        self.assertEqual(audit["issues"][0]["severity"], "minor")
+
+    def test_scene_summary_flags_named_primitive_placeholders(self) -> None:
+        summary = summarize_scene({"objects": [{"id": "keyboard", "type": "cube"}, {"id": "cube", "type": "cube"}]})
+        self.assertEqual(summary["primitive_like_named_objects"], ["keyboard"])
 
 if __name__ == "__main__":
     unittest.main()

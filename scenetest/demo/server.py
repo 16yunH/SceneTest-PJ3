@@ -104,6 +104,7 @@ def _run_scene(payload: Dict[str, Any]) -> Dict[str, Any]:
     prompt = str(payload.get("prompt") or DEFAULT_PROMPT).strip()
     backend = str(payload.get("backend") or "deepseek")
     render_blender = bool(payload.get("render_blender", True))
+    llm_audit_enabled = bool(payload.get("llm_audit", True))
     if backend not in {"deepseek", "deterministic"}:
         raise ValueError("backend must be deepseek or deterministic")
 
@@ -165,6 +166,29 @@ def _run_scene(payload: Dict[str, Any]) -> Dict[str, Any]:
             "url": _artifact_url(scene_id, "scenetest/render_blender.png") if blender_output.exists() else None,
         }
 
+    llm_audit_result: Dict[str, Any] | None = None
+    if llm_audit_enabled:
+        audit_cmd = [
+            sys.executable,
+            str(ROOT / "main.py"),
+            "audit",
+            "--run-dir",
+            str(out_dir),
+            "--method",
+            "scenetest",
+        ]
+        astart = time.time()
+        audit_proc = subprocess.run(audit_cmd, cwd=ROOT, text=True, capture_output=True, timeout=180)
+        audit_output = out_dir / "scenetest" / "llm_audit.json"
+        llm_audit_result = {
+            "ok": audit_proc.returncode == 0,
+            "elapsed_sec": round(time.time() - astart, 2),
+            "stdout": audit_proc.stdout,
+            "stderr": audit_proc.stderr,
+            "audit": _read_json(audit_output) if audit_output.exists() else None,
+            "url": _artifact_url(scene_id, "scenetest/llm_audit.json") if audit_output.exists() else None,
+        }
+
     return {
         "ok": True,
         "scene_id": scene_id,
@@ -180,6 +204,7 @@ def _run_scene(payload: Dict[str, Any]) -> Dict[str, Any]:
         },
         "repair_history": _read_json(out_dir / "scenetest" / "repair_history.json"),
         "blender": blender_result,
+        "llm_audit": llm_audit_result,
     }
 
 
@@ -302,7 +327,7 @@ def _index_html() -> str:
     #status {{ min-height: 24px; margin: 18px 0; color: var(--muted); font-size: 15px; }}
     .metrics {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(160px, 1fr));
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
       gap: 12px;
       margin-bottom: 18px;
     }}
@@ -383,7 +408,7 @@ def _index_html() -> str:
       <h1>SceneTest Live Demo</h1>
       <div class="repo">Local SceneTest Demo</div>
     </div>
-    <div class="repo">Contract -> Tests -> Repair -> Blender Render</div>
+    <div class="repo">Contract -> Tests -> Repair -> LLM Audit -> Blender Render</div>
   </header>
   <main>
     <div class="control">
@@ -396,6 +421,7 @@ def _index_html() -> str:
             <option value="deterministic">Deterministic offline</option>
           </select>
         </div>
+        <label class="checkline"><input type="checkbox" id="audit" checked /> LLM semantic audit</label>
         <label class="checkline"><input type="checkbox" id="blender" checked /> Blender render</label>
         <button id="run">Run SceneTest</button>
       </div>
@@ -419,7 +445,8 @@ def _index_html() -> str:
           body: JSON.stringify({{
             prompt: document.getElementById("prompt").value,
             backend: document.getElementById("backend").value,
-            render_blender: document.getElementById("blender").checked
+            render_blender: document.getElementById("blender").checked,
+            llm_audit: document.getElementById("audit").checked
           }})
         }});
         const data = await response.json();
@@ -443,12 +470,16 @@ def _index_html() -> str:
       const final = methods.scenetest;
       const failures0 = methods.contract_only.failures.length;
       const blenderUrl = data.blender && data.blender.url;
+      const audit = data.llm_audit;
+      const auditLabel = audit ? (audit.ok && audit.audit ? (audit.audit.pass ? "Pass" : "Review") : "Error") : "Off";
+      const auditMeta = audit && audit.ok && audit.audit ? `${{Math.round(audit.audit.overall_score * 100)}} / 100 semantic` : "LLM semantic audit";
       return `
         <div class="metrics">
           <div class="metric"><b>${{data.backend}}</b><span>contract backend</span></div>
           <div class="metric"><b>${{methods.single_pass.passed}}/${{methods.single_pass.total}}</b><span>single-pass tests</span></div>
           <div class="metric"><b>${{methods.contract_only.passed}}/${{methods.contract_only.total}}</b><span>contract-only tests</span></div>
           <div class="metric"><b>${{final.passed}}/${{final.total}}</b><span>SceneTest tests</span></div>
+          <div class="metric"><b>${{auditLabel}}</b><span>${{auditMeta}}</span></div>
         </div>
         <div class="renders">
           ${{figure(methods.single_pass.render_url, "Single-pass", pct(methods.single_pass.pass_rate))}}
@@ -460,6 +491,7 @@ def _index_html() -> str:
           ${{panel("Scene Contract", JSON.stringify(data.contract, null, 2))}}
           ${{panel("Contract-only Failures", failures0 ? JSON.stringify(methods.contract_only.failures, null, 2) : "No failures")}}
           ${{panel("Repair History", JSON.stringify(data.repair_history, null, 2))}}
+          ${{audit ? panel("LLM Semantic Audit", JSON.stringify(audit.ok ? audit.audit : audit, null, 2)) : ""}}
         </div>
       `;
     }}

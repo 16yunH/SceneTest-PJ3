@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 from scenetest.agents.code_agent import CodeAgent
 from scenetest.agents.contract_agent import ContractAgent
 from scenetest.agents.deepseek_contract_agent import DeepSeekContractAgent
+from scenetest.agents.llm_auditor import DeepSeekSceneAuditor
 from scenetest.agents.repair_agent import RepairAgent
 from scenetest.blender.exporter import export_blender_script
 from scenetest.core.contract_schema import SceneContract
@@ -34,6 +35,10 @@ def cmd_run(args: argparse.Namespace) -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     _run_contract(contract, out_dir, render=not args.no_render)
+    if args.llm_audit:
+        audit = _write_llm_audit(out_dir, "scenetest")
+        print(f"Wrote LLM semantic audit to {out_dir / 'scenetest' / 'llm_audit.json'}")
+        print(f"LLM audit: {'pass' if audit['pass'] else 'fail'} ({audit['overall_score']:.2f})")
     print(f"Wrote run artifacts to {out_dir}")
 
 
@@ -51,6 +56,8 @@ def cmd_batch(args: argparse.Namespace) -> None:
         contract = _contract_agent(args).parse(prompt, scene_id=scene_id)
         scene_dir = out_dir / scene_id
         method_rows = _run_contract(contract, scene_dir, render=not args.no_render)
+        if args.llm_audit:
+            _write_llm_audit(scene_dir, "scenetest")
         rows.extend(method_rows)
     summary = aggregate(rows)
     (out_dir / "raw_results.json").write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -83,6 +90,14 @@ def cmd_render_blender(args: argparse.Namespace) -> None:
     ]
     subprocess.run(cmd, check=True)
     print(f"Wrote Blender render to {output}")
+
+
+def cmd_audit(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    audit = _write_llm_audit(run_dir, args.method)
+    output = run_dir / args.method / "llm_audit.json"
+    print(f"Wrote LLM semantic audit to {output}")
+    print(json.dumps(audit, indent=2, ensure_ascii=False))
 
 
 def cmd_self_check(args: argparse.Namespace) -> None:
@@ -162,14 +177,20 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--scene-id", default="demo_scene")
     run.add_argument("--out-dir", default=str(ROOT / "experiments" / "runs" / "demo_scene"))
     run.add_argument("--no-render", action="store_true")
+    run.add_argument("--llm-audit", action="store_true", help="run DeepSeek text semantic audit after SceneTest")
     _add_contract_args(run)
     run.set_defaults(func=cmd_run)
     batch = sub.add_parser("batch", help="run a JSONL prompt set")
     batch.add_argument("--prompts", default=str(ROOT / "experiments" / "prompts.jsonl"))
     batch.add_argument("--out-dir", default=str(ROOT / "experiments" / "runs" / "batch"))
     batch.add_argument("--no-render", action="store_true")
+    batch.add_argument("--llm-audit", action="store_true", help="run DeepSeek text semantic audit for each final scene")
     _add_contract_args(batch)
     batch.set_defaults(func=cmd_batch)
+    audit = sub.add_parser("audit", help="run text-only LLM semantic audit for an existing run")
+    audit.add_argument("--run-dir", required=True, help="directory containing contract.json and method artifacts")
+    audit.add_argument("--method", default="scenetest", choices=("single_pass", "contract_only", "scenetest"))
+    audit.set_defaults(func=cmd_audit)
     render_blender = sub.add_parser("render-blender", help="render a scene.json through Blender")
     render_blender.add_argument("--scene-json", required=True)
     render_blender.add_argument("--output", required=True)
@@ -214,6 +235,34 @@ def _contract_agent(args: argparse.Namespace):
             fallback=not args.no_llm_fallback,
         )
     return ContractAgent()
+
+
+def _write_llm_audit(run_dir: Path, method: str) -> Dict[str, Any]:
+    config = _load_project_config()
+    auditor = DeepSeekSceneAuditor.from_config(config)
+    contract = _read_json(run_dir / "contract.json")
+    scene = _read_json(run_dir / method / "scene.json")
+    test_results = _read_json(run_dir / method / "test_results.json")
+    repair_history: List[Dict[str, Any]] = []
+    if method == "scenetest":
+        repair_path = run_dir / method / "repair_history.json"
+        if repair_path.exists():
+            repair_history = _read_json(repair_path)
+    audit = auditor.audit_scene(
+        scene_id=str(contract.get("id") or run_dir.name),
+        prompt=str(contract.get("prompt") or ""),
+        contract=contract,
+        scene=scene,
+        test_results=test_results,
+        repair_history=repair_history,
+    )
+    output = run_dir / method / "llm_audit.json"
+    output.write_text(json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8")
+    return audit
+
+
+def _read_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _load_project_config() -> Dict[str, Any]:

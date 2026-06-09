@@ -193,6 +193,14 @@ def write_gallery(rows: list[dict[str, str]], gallery_dir: Path) -> None:
     (gallery_dir / "index.html").write_text(index, encoding="utf-8")
 
 
+def display_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(ROOT))
+    except ValueError:
+        return resolved.name
+
+
 def main() -> None:
     args = parse_args()
     run_dir = Path(args.run_dir).resolve()
@@ -221,12 +229,19 @@ def main() -> None:
         )
     write_gallery(rows, gallery_dir)
     manifest = {
-        "run_dir": str(run_dir),
-        "gallery_dir": str(gallery_dir),
+        "run_dir": display_path(run_dir),
+        "gallery_dir": display_path(gallery_dir),
         "count": len(rows),
         "frames": args.frames,
         "resolution": args.resolution,
-        "rows": rows,
+        "rows": [
+            {
+                **row,
+                "still": display_path(Path(row["still"])),
+                "gif": display_path(Path(row["gif"])),
+            }
+            for row in rows
+        ],
     }
     (gallery_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"Wrote gallery to {gallery_dir / 'index.html'}")
