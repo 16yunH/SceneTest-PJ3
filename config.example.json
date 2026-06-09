@@ -1,0 +1,10 @@
+{
+  "contract_backend": "deterministic",
+  "deepseek_api_key": "",
+  "deepseek_base_url": "https://api.deepseek.com",
+  "deepseek_model": "deepseek-v4-pro",
+  "blender_path": "/Applications/Blender.app/Contents/MacOS/Blender",
+  "max_repair_iterations": 3,
+  "render_resolution": [1024, 768],
+  "code_url": "https://github.com/<your-github-user>/SceneTest-PJ3"
+}
